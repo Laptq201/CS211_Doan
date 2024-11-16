@@ -52,7 +52,7 @@ class Memory():
     def add(self, datum):
 
         state, n_state, action, reward, done = datum
-        state = state[0]  # added
+
         self.states[self.pos] = FloatTensor(state)
         self.n_states[self.pos] = FloatTensor(n_state)
         self.actions[self.pos] = FloatTensor(action)
