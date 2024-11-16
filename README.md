@@ -1,7 +1,12 @@
 # CEM-RL
 Pytorch implementation of CEM-RL: https://arxiv.org/pdf/1810.01222.pdf
+Thanks for https://github.com/apourchot/CEM-RL
 
-To reproduce the results of the paper:
+Đồ án CS211: AI++
+Nhớ tải file requirement.txt 
+Để có thể training thì nên dùng colab (chạy train.ypnb)
+Dùng test.py để test môi trường (nhớ chỉnh file path actor.pkl)
+
 
 Without importance mixing:
 ```console

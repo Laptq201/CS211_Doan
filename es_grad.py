@@ -32,16 +32,6 @@ def evaluate(actor, env, memory=None, n_episodes=1, random=False, noise=None, re
 
     if not random:
         def policy(state):
-            # print(state)
-            # print(state.dtype)
-            # state_filtered = [np.asarray(s, dtype=np.float32).flatten(
-            # ) for s in state if isinstance(s, (np.ndarray, list, tuple))]
-            # if state_filtered:
-            #     state = np.concatenate(state_filtered)
-            # else:
-            #     state = np.array([], dtype=np.float32)
-            # state = FloatTensor(state)
-            state = state[0]
             state = FloatTensor(state.reshape(-1))
             action = actor(state).cpu().data.numpy().flatten()
 
@@ -67,7 +57,7 @@ def evaluate(actor, env, memory=None, n_episodes=1, random=False, noise=None, re
 
             # get next action and act
             action = policy(obs)
-            n_obs, reward, done, *_ = env.step(action)
+            n_obs, reward, done, _ = env.step(action)
             done_bool = 0 if steps + \
                 1 == env._max_episode_steps else float(done)
             score += reward
@@ -504,7 +494,6 @@ if __name__ == "__main__":
                 critic.save_model(args.output, "critic")
                 actor.set_params(es.mu)
                 actor.save_model(args.output, "actor")
-            # df = df.append(res, ignore_index=True)
             res_df = pd.DataFrame([res])  # added
             df = pd.concat([df, res_df], ignore_index=True)  # added
             step_cpt = 0
