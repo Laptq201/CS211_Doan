@@ -4,7 +4,9 @@ Thanks for https://github.com/apourchot/CEM-RL
 
 Đồ án CS211: AI++
 
-Nhớ tải file requirement.txt để có thể 
+Nhớ tải file requirement.txt
+
+Nhớ tải file requirement.txt 
 
 Để có thể training thì nên dùng colab (chạy train.ypnb)
 
