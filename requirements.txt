@@ -1,0 +1,10 @@
+gym==0.26.2
+numpy==1.23.0
+pandas==2.2.3
+torch==2.5.1
+tqdm==4.67.0
+glfw==2.7.0
+mujoco==2.3.5
+PyOpenGL==3.1.7
+pillow==11.0.0
+# Python 3.9.20 is required (not directly set in requirements.txt)
