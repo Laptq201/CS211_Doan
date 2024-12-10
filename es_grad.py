@@ -16,6 +16,7 @@ from models import RLNN
 from random_process import GaussianNoise, OrnsteinUhlenbeckProcess
 from memory import Memory
 from util import *
+import wandb
 
 USE_CUDA = torch.cuda.is_available()
 if USE_CUDA:
@@ -359,6 +360,10 @@ if __name__ == "__main__":
         for key, value in vars(args).items():
             file.write("{} = {}\n".format(key, value))
 
+
+    wandb.init(project="DoAn_CS211", config=args)
+    wandb.config.update(vars(args))
+
     # environment
     env = gym.make(args.env)
     state_dim = env.observation_space.shape[0]
@@ -445,6 +450,7 @@ if __name__ == "__main__":
                                 render=args.render, noise=a_noise)
             actor_steps += steps
             prCyan('Noisy actor {} fitness:{}'.format(i, f))
+            wandb.log({"noisy_actor_{}_fitness".format(i): f})
 
         # evaluate all actors
         for params in es_params:
@@ -454,7 +460,7 @@ if __name__ == "__main__":
                                 render=args.render)
             actor_steps += steps
             fitness.append(f)
-
+            wandb.log({"actor_fitness": f})
             # print scores
             prLightPurple('Actor fitness:{}'.format(f))
 
@@ -474,7 +480,14 @@ if __name__ == "__main__":
             f_mu, _ = evaluate(actor, env, memory=None, n_episodes=args.n_eval,
                                render=args.render)
             prRed('Actor Mu Average Fitness:{}'.format(f_mu))
-
+            wandb.log({
+                "total_steps": total_steps,
+                "average_score": np.mean(fitness),
+                "average_score_rl": np.mean(fitness[:args.n_grad]),
+                "average_score_ea": np.mean(fitness[args.n_grad:]),
+                "best_score": np.max(fitness),
+                "mu_score": f_mu,
+            })
             df.to_pickle(args.output + "/log.pkl")
             res = {"total_steps": total_steps,
                    "average_score": np.mean(fitness),
