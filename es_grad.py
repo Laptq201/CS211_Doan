@@ -505,6 +505,7 @@ if __name__ == "__main__":
                 actor.set_params(es.mu)
                 actor.save_model(
                     args.output + "/{}_steps".format(total_steps), "actor_mu")
+                wandb.save(args.output + "/{}_steps".format(total_steps))
             else:
                 critic.save_model(args.output, "critic")
                 actor.set_params(es.mu)
