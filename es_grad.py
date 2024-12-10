@@ -59,7 +59,7 @@ def evaluate(actor, env, memory=None, n_episodes=1, random=False, noise=None, re
 
             # get next action and act
             action = policy(obs)
-            n_obs, reward, done, _ = env.step(action)
+            n_obs, reward, done, *_ = env.step(action)
             done_bool = 0 if steps + \
                 1 == env._max_episode_steps else float(done)
             score += reward
