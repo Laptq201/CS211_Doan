@@ -3,7 +3,9 @@ import argparse
 
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
 import torch.nn.functional as F
+import cma
 import pandas as pd
 
 import gym
@@ -11,12 +13,18 @@ import gym.spaces
 import numpy as np
 from tqdm import tqdm
 
-from ES import sepCEM, Control
+from ES import sepCMAES, sepCEM, sepMCEM
 from models import RLNN
-from random_process import GaussianNoise, OrnsteinUhlenbeckProcess
-from memory import Memory
+from collections import namedtuple
+from random_process import GaussianNoise
+from memory import Memory, Archive
+from samplers import IMSampler
 from util import *
 
+
+Sample = namedtuple('Sample', ('params', 'score',
+                               'gens', 'start_pos', 'end_pos', 'steps'))
+Theta = namedtuple('Theta', ('mu', 'cov', 'samples'))
 USE_CUDA = torch.cuda.is_available()
 if USE_CUDA:
     FloatTensor = torch.cuda.FloatTensor
@@ -32,8 +40,6 @@ def evaluate(actor, env, memory=None, n_episodes=1, random=False, noise=None, re
 
     if not random:
         def policy(state):
-            if isinstance(state, tuple):
-                state = state[0] 
             state = FloatTensor(state.reshape(-1))
             action = actor(state).cpu().data.numpy().flatten()
 
@@ -81,6 +87,26 @@ def evaluate(actor, env, memory=None, n_episodes=1, random=False, noise=None, re
         scores.append(score)
 
     return np.mean(scores), steps
+
+
+def evaluate_with_logging(actor, env, n_episodes=1, render=False):
+    """
+    Evaluate the actor while logging state and action information.
+    """
+    for episode in range(n_episodes):
+        obs = env.reset()
+        done = False
+        total_reward = 0
+        while not done:
+            action = actor(FloatTensor(obs.reshape(-1))).cpu().data.numpy().flatten()
+            print(f"State: {obs}, Action: {action}")  # Log state and action
+            
+            obs, reward, done, _ = env.step(action)
+            total_reward += reward
+            if render:
+                env.render()
+
+        print(f"Episode {episode + 1}, Total Reward: {total_reward}")
 
 
 class Actor(RLNN):
@@ -264,9 +290,9 @@ class CriticTD3(RLNN):
 
         # Select action according to policy and add clipped noise
         noise = np.clip(np.random.normal(0, self.policy_noise, size=(
-            batch_size, action_dim)), -self.noise_clip, self.noise_clip)
+            batch_size, self.action_dim)), -self.noise_clip, self.noise_clip)
         n_actions = actor_t(n_states) + FloatTensor(noise)
-        n_actions = n_actions.clamp(-max_action, max_action)
+        n_actions = n_actions.clamp(-self.max_action, self.max_action)
 
         # Q target = reward + discount * min_i(Qi(next_state, pi(next_state)))
         with torch.no_grad():
@@ -333,6 +359,11 @@ if __name__ == "__main__":
     parser.add_argument('--damp_limit', default=1e-5, type=float)
     parser.add_argument('--mult_noise', dest='mult_noise', action='store_true')
 
+    # Sampler parameters
+    parser.add_argument('--alpha', type=float, default=1)
+    parser.add_argument('--epsilon', type=float, default=0)
+    parser.add_argument('--k', type=int, default=1)
+
     # Training parameters
     parser.add_argument('--n_episodes', default=1, type=int)
     parser.add_argument('--max_steps', default=1000000, type=int)
@@ -357,148 +388,137 @@ if __name__ == "__main__":
     args.output = get_output_folder(args.output, args.env)
     with open(args.output + "/parameters.txt", 'w') as file:
         for key, value in vars(args).items():
-            file.write("{} = {}\n".format(key, value))
+            file.write("{} = {}".format(key, value))
 
     # environment
     env = gym.make(args.env)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    max_action = int(env.action_space.high[0])
+    max_action = float(env.action_space.high[0])
 
-    # memory
-    memory = Memory(args.mem_size, state_dim, action_dim)
-
-    # critic
-    if args.use_td3:
-        critic = CriticTD3(state_dim, action_dim, max_action, args)
-        critic_t = CriticTD3(state_dim, action_dim, max_action, args)
-        critic_t.load_state_dict(critic.state_dict())
-
+    # Load model for inference if mode is 'inference'
+    if args.mode == 'inference':
+        actor = Actor(state_dim, action_dim, max_action, args)
+        actor.load_state_dict(torch.load(args.output + "/actor.pth"))
+        if USE_CUDA:
+            actor.cuda()
+        print("\nRunning inference...")
+        evaluate_with_logging(actor, env, n_episodes=args.n_eval, render=args.render)
     else:
-        critic = Critic(state_dim, action_dim, max_action, args)
-        critic_t = Critic(state_dim, action_dim, max_action, args)
-        critic_t.load_state_dict(critic.state_dict())
+        # memory
+        memory = Memory(args.mem_size, state_dim, action_dim)
 
-    # actor
-    actor = Actor(state_dim, action_dim, max_action, args)
-    actor_t = Actor(state_dim, action_dim, max_action, args)
-    actor_t.load_state_dict(actor.state_dict())
+        # critic
+        if args.use_td3:
+            critic = CriticTD3(state_dim, action_dim, max_action, args)
+            critic_t = CriticTD3(state_dim, action_dim, max_action, args)
+            critic_t.load_state_dict(critic.state_dict())
 
-    # action noise
-    if not args.ou_noise:
+        else:
+            critic = Critic(state_dim, action_dim, max_action, args)
+            critic_t = Critic(state_dim, action_dim, max_action, args)
+            critic_t.load_state_dict(critic.state_dict())
+
+        # actor
+        actor = Actor(state_dim, action_dim, max_action, args)
+        actor_t = Actor(state_dim, action_dim, max_action, args)
+        actor_t.load_state_dict(actor.state_dict())
         a_noise = GaussianNoise(action_dim, sigma=args.gauss_sigma)
-    else:
-        a_noise = OrnsteinUhlenbeckProcess(
-            action_dim, mu=args.ou_mu, theta=args.ou_theta, sigma=args.ou_sigma)
 
-    if USE_CUDA:
-        critic.cuda()
-        critic_t.cuda()
-        actor.cuda()
-        actor_t.cuda()
+        if USE_CUDA:
+            critic.cuda()
+            critic_t.cuda()
+            actor.cuda()
+            actor_t.cuda()
 
-    # CEM
-    es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
-                pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
-    # es = Control(actor.get_size(), pop_size=args.pop_size, mu_init=actor.get_params())
+        # CEM
+        es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
+                    pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
+        sampler = IMSampler(es)
 
-    # training
-    step_cpt = 0
-    total_steps = 0
-    actor_steps = 0
-    df = pd.DataFrame(columns=["total_steps", "average_score",
-                               "average_score_rl", "average_score_ea", "best_score"])
-    while total_steps < args.max_steps:
+        # stuff to save
+        df = pd.DataFrame(columns=["total_steps", "average_score",
+                                   "average_score_rl", "average_score_ea", "best_score"])
 
-        fitness = []
-        fitness_ = []
-        es_params = es.ask(args.pop_size)
-
-        # udpate the rl actors and the critic
-        if total_steps > args.start_steps:
-
-            for i in range(args.n_grad):
-
-                # set params
-                actor.set_params(es_params[i])
-                actor_t.set_params(es_params[i])
-                actor.optimizer = torch.optim.Adam(
-                    actor.parameters(), lr=args.actor_lr)
-
-                # critic update
-                for _ in tqdm(range(actor_steps // args.n_grad)):
-                    critic.update(memory, args.batch_size, actor, critic_t)
-
-                # actor update
-                for _ in tqdm(range(actor_steps)):
-                    actor.update(memory, args.batch_size,
-                                 critic, actor_t)
-
-                # get the params back in the population
-                es_params[i] = actor.get_params()
+        # training
+        step_cpt = 0
+        total_steps = 0
         actor_steps = 0
+        reused_steps = 0
 
-        # evaluate noisy actor(s)
-        for i in range(args.n_noisy):
-            actor.set_params(es_params[i])
-            f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
-                                render=args.render, noise=a_noise)
-            actor_steps += steps
-            prCyan('Noisy actor {} fitness:{}'.format(i, f))
+        es_params = []
+        fitness = []
+        n_steps = []
+        n_start = []
 
-        # evaluate all actors
-        for params in es_params:
+        old_es_params = []
+        old_fitness = []
+        old_n_steps = []
+        old_n_start = []
 
-            actor.set_params(params)
-            f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
-                                render=args.render)
-            actor_steps += steps
-            fitness.append(f)
+        while total_steps < args.max_steps:
 
-            # print scores
-            prLightPurple('Actor fitness:{}'.format(f))
+            fitness = np.zeros(args.pop_size)
+            n_start = np.zeros(args.pop_size)
+            n_steps = np.zeros(args.pop_size)
+            es_params, n_r, idx_r = sampler.ask(args.pop_size, old_es_params)
+            print("Reused {} samples".format(n_r))
 
-        # update es
-        es.tell(es_params, fitness)
+            # udpate the rl actors and the critic
+            if total_steps > args.start_steps:
 
-        # update step counts
-        total_steps += actor_steps
-        step_cpt += actor_steps
+                for i in range(args.n_grad):
 
-        # save stuff
-        if step_cpt >= args.period:
+                    # set params
+                    actor.set_params(es_params[i])
+                    actor_t.set_params(es_params[i])
+                    actor.optimizer = torch.optim.Adam(
+                        actor.parameters(), lr=args.actor_lr)
 
-            # evaluate mean actor over several runs. Memory is not filled
-            # and steps are not counted
-            actor.set_params(es.mu)
-            f_mu, _ = evaluate(actor, env, memory=None, n_episodes=args.n_eval,
-                               render=args.render)
-            prRed('Actor Mu Average Fitness:{}'.format(f_mu))
+                    # critic update
+                    for _ in tqdm(range((actor_steps + reused_steps) // args.n_grad)):
+                        critic.update(memory, args.batch_size, actor, critic_t)
 
-            df.to_pickle(args.output + "/log.pkl")
-            res = {"total_steps": total_steps,
-                   "average_score": np.mean(fitness),
-                   "average_score_half": np.mean(np.partition(fitness, args.pop_size // 2 - 1)[args.pop_size // 2:]),
-                   "average_score_rl": np.mean(fitness[:args.n_grad]),
-                   "average_score_ea": np.mean(fitness[args.n_grad:]),
-                   "best_score": np.max(fitness),
-                   "mu_score": f_mu}
+                    # actor update
+                    for _ in tqdm(range(actor_steps + reused_steps)):
+                        actor.update(memory, args.batch_size,
+                                     critic, actor_t)
 
-            if args.save_all_models:
-                os.makedirs(args.output + "/{}_steps".format(total_steps),
-                            exist_ok=True)
-                critic.save_model(
-                    args.output + "/{}_steps".format(total_steps), "critic")
-                actor.set_params(es.mu)
-                actor.save_model(
-                    args.output + "/{}_steps".format(total_steps), "actor_mu")
-            else:
-                critic.save_model(args.output, "critic")
-                actor.set_params(es.mu)
-                actor.save_model(args.output, "actor")
-            res_df = pd.DataFrame([res])  # added
-            df = pd.concat([df, res_df], ignore_index=True)  # added
-            step_cpt = 0
-            print(res)
+                    # get the params back in the population
+                    es_params[i] = actor.get_params()
 
-        print("Total steps", total_steps)
+            actor_steps = 0
+            reused_steps = 0
+
+            # evaluate noisy actor(s)
+            for i in range(args.n_noisy):
+                actor.set_params(es_params[i])
+                f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
+                                    render=args.render, noise=a_noise)
+                actor_steps += steps
+                prCyan('Noisy actor {} fitness:{}'.format(i, f))
+
+            # evaluate all actors
+            for i in range(args.pop_size):
+
+                # evaluate new actors
+                if i < args.n_grad or (i >= args.n_grad and (i - args.n_grad) >= n_r):
+
+                    actor.set_params(es_params[i])
+                    pos = memory.get_pos()
+                    f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
+                                        render=args.render)
+                    actor_steps += steps
+
+                    # updating arrays
+                    fitness[i] = f
+                    n_steps[i] = steps
+                    n_start[i] = pos
+
+                    # print scores
+                    prLightPurple('Actor {}, fitness:{}'.format(i, f))
+
+                # reusing actors
+                else:
+                    idx = idx_r[i - args.n_grad]
+                    fitness
