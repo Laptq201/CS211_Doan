@@ -3,9 +3,7 @@ import argparse
 
 import torch
 import torch.nn as nn
-import torch.multiprocessing as mp
 import torch.nn.functional as F
-import cma
 import pandas as pd
 
 import gym
@@ -13,12 +11,10 @@ import gym.spaces
 import numpy as np
 from tqdm import tqdm
 
-from ES import sepCMAES, sepCEM, sepMCEM
+from ES import sepCEM, Control
 from models import RLNN
-from collections import namedtuple
-from random_process import GaussianNoise
-from memory import Memory, Archive
-from samplers import IMSampler
+from random_process import GaussianNoise, OrnsteinUhlenbeckProcess
+from memory import Memory
 from util import *
 import wandb
 
