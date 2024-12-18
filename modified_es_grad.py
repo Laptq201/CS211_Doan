@@ -20,6 +20,7 @@ from random_process import GaussianNoise
 from memory import Memory, Archive
 from samplers import IMSampler
 from util import *
+import wandb
 
 
 Sample = namedtuple('Sample', ('params', 'score',
@@ -390,7 +391,9 @@ if __name__ == "__main__":
         for key, value in vars(args).items():
             file.write("{} = {}".format(key, value))
 
-    # environment
+    wandb.init(project="DoAn_CS211", config=args)
+    wandb.config.update(vars(args))
+
     env = gym.make(args.env)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
@@ -408,117 +411,179 @@ if __name__ == "__main__":
         # memory
         memory = Memory(args.mem_size, state_dim, action_dim)
 
-        # critic
-        if args.use_td3:
-            critic = CriticTD3(state_dim, action_dim, max_action, args)
-            critic_t = CriticTD3(state_dim, action_dim, max_action, args)
-            critic_t.load_state_dict(critic.state_dict())
-
-        else:
-            critic = Critic(state_dim, action_dim, max_action, args)
-            critic_t = Critic(state_dim, action_dim, max_action, args)
-            critic_t.load_state_dict(critic.state_dict())
 
         # actor
         actor = Actor(state_dim, action_dim, max_action, args)
-        actor_t = Actor(state_dim, action_dim, max_action, args)
-        actor_t.load_state_dict(actor.state_dict())
+        # actor_t = Actor(state_dim, action_dim, max_action, args)
+        # actor_t.load_state_dict(actor.state_dict())
         a_noise = GaussianNoise(action_dim, sigma=args.gauss_sigma)
 
         if USE_CUDA:
-            critic.cuda()
-            critic_t.cuda()
             actor.cuda()
-            actor_t.cuda()
+            # actor_t.cuda()
 
         # CEM
         es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
                     pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
-        sampler = IMSampler(es)
-
+        step_cpt = 0
+        total_steps = 0
+        actor_steps = 0
         # stuff to save
         df = pd.DataFrame(columns=["total_steps", "average_score",
                                    "average_score_rl", "average_score_ea", "best_score"])
 
-        # training
-        step_cpt = 0
-        total_steps = 0
-        actor_steps = 0
-        reused_steps = 0
+    while total_steps < args.max_steps:
+        # 1. Sample population from current distribution
+        es_params = es.ask(args.pop_size)
 
-        es_params = []
+        # 2. Evaluate population
         fitness = []
-        n_steps = []
-        n_start = []
+        for params in es_params:
+            actor.set_params(params)
+            f, steps = evaluate(actor, env, n_episodes=args.n_episodes, render=args.render)
+            fitness.append(f)
+            total_steps += steps
+            print(f"Actor fitness: {f}")
 
-        old_es_params = []
-        old_fitness = []
-        old_n_steps = []
-        old_n_start = []
+        # 3. Update the distribution based on fitness
+        es.tell(es_params, fitness)
+        total_steps += actor_steps
+        step_cpt += actor_steps
 
-        while total_steps < args.max_steps:
+        # save stuff
+        if step_cpt >= args.period:
 
-            fitness = np.zeros(args.pop_size)
-            n_start = np.zeros(args.pop_size)
-            n_steps = np.zeros(args.pop_size)
-            es_params, n_r, idx_r = sampler.ask(args.pop_size, old_es_params)
-            print("Reused {} samples".format(n_r))
+            # evaluate mean actor over several runs. Memory is not filled
+            # and steps are not counted
+            actor.set_params(es.mu)
+            f_mu, _ = evaluate(actor, env, memory=None, n_episodes=args.n_eval,
+                               render=args.render)
+            prRed('Actor Mu Average Fitness:{}'.format(f_mu))
+            wandb.log({
+                "total_steps": total_steps,
+                "average_score": np.mean(fitness),
+                "best_score": np.max(fitness),
+                "mu_score": f_mu,
+            })
+            df.to_pickle(args.output + "/log.pkl")
+            res = {"total_steps": total_steps,
+                   "average_score": np.mean(fitness),
+                   "best_score": np.max(fitness),
+                   "mu_score": f_mu}
 
-            # udpate the rl actors and the critic
-            if total_steps > args.start_steps:
+            if args.save_all_models:
+                os.makedirs(args.output + "/{}_steps".format(total_steps),
+                            exist_ok=True)
+                actor.set_params(es.mu)
+                actor.save_model(
+                    args.output + "/{}_steps".format(total_steps), "actor_mu")
+            else:
+                actor.set_params(es.mu)
+                actor.save_model(args.output, "actor")
+                wandb.save(args.output + "/actor.pth")
+            res_df = pd.DataFrame([res])  # added
+            df = pd.concat([df, res_df], ignore_index=True)  # added
+            step_cpt = 0
+            print(res)
 
-                for i in range(args.n_grad):
+        print("Total steps", total_steps)
 
-                    # set params
-                    actor.set_params(es_params[i])
-                    actor_t.set_params(es_params[i])
-                    actor.optimizer = torch.optim.Adam(
-                        actor.parameters(), lr=args.actor_lr)
 
-                    # critic update
-                    for _ in tqdm(range((actor_steps + reused_steps) // args.n_grad)):
-                        critic.update(memory, args.batch_size, actor, critic_t)
 
-                    # actor update
-                    for _ in tqdm(range(actor_steps + reused_steps)):
-                        actor.update(memory, args.batch_size,
-                                     critic, actor_t)
 
-                    # get the params back in the population
-                    es_params[i] = actor.get_params()
 
-            actor_steps = 0
-            reused_steps = 0
 
-            # evaluate noisy actor(s)
-            for i in range(args.n_noisy):
-                actor.set_params(es_params[i])
-                f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
-                                    render=args.render, noise=a_noise)
-                actor_steps += steps
-                prCyan('Noisy actor {} fitness:{}'.format(i, f))
 
-            # evaluate all actors
-            for i in range(args.pop_size):
 
-                # evaluate new actors
-                if i < args.n_grad or (i >= args.n_grad and (i - args.n_grad) >= n_r):
 
-                    actor.set_params(es_params[i])
-                    pos = memory.get_pos()
-                    f, steps = evaluate(actor, env, memory=memory, n_episodes=args.n_episodes,
-                                        render=args.render)
-                    actor_steps += steps
 
-                    # updating arrays
-                    fitness[i] = f
-                    n_steps[i] = steps
-                    n_start[i] = pos
 
-                    # print scores
-                    prLightPurple('Actor {}, fitness:{}'.format(i, f))
 
-                # reusing actors
-                else:
-                    idx = idx_r[i - args.n_grad]
-                    fitness
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
