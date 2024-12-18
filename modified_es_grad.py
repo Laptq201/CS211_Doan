@@ -290,12 +290,14 @@ if __name__ == "__main__":
         es.tell(es_params, fitness)
         total_steps += actor_steps
         step_cpt += actor_steps
-
+        print(step_cpt)
+        print(args.period)
         # save stuff
         if step_cpt >= args.period:
 
             # evaluate mean actor over several runs. Memory is not filled
             # and steps are not counted
+            print("here")
             actor.set_params(es.mu)
             f_mu, _ = evaluate(actor, env, memory=None, n_episodes=args.n_eval,
                                render=args.render)
