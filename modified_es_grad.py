@@ -283,15 +283,14 @@ if __name__ == "__main__":
             actor.set_params(params)
             f, steps = evaluate(actor, env, n_episodes=args.n_episodes, render=args.render)
             fitness.append(f)
-            total_steps += steps
+            actor_steps += steps
             print(f"Actor fitness: {f}")
+            wandb.log({"Actor fitness": f})
 
         # 3. Update the distribution based on fitness
         es.tell(es_params, fitness)
         total_steps += actor_steps
         step_cpt += actor_steps
-        print(step_cpt)
-        print(args.period)
         # save stuff
         if step_cpt >= args.period:
 
