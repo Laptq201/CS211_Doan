@@ -13,6 +13,7 @@ from td3 import DTD3
 from random_process import *
 from util import *
 from memory import Memory, SharedMemory
+import wandb
 
 USE_CUDA = torch.cuda.is_available()
 if USE_CUDA:
@@ -103,6 +104,7 @@ def train(n_episodes, output=None, debug=False, render=False):
 
             # print score
             prCyan('noisy RL agent fitness:{}'.format(f))
+            wandb.log({"noisy RL agent fitness": f})
 
         for i in range(args.n_actor):
             agent.train(actor_steps, i)
@@ -126,7 +128,9 @@ def train(n_episodes, output=None, debug=False, render=False):
 
                 # print score
                 prRed('RL agent fitness:{}'.format(f))
+                wandb.log({"RL agent fitness": f})
 
+            wandb.log({"total_steps": total_steps, "average_score": np.mean(fs), "best_score": np.max(fs)})
             # saving scores
             res = {"total_steps": total_steps,
                    "average_score": np.mean(fs), "best_score": np.max(fs)}
@@ -206,6 +210,8 @@ if __name__ == "__main__":
         for key, value in vars(args).items():
             file.write("{} = {}\n".format(key, value))
 
+    wandb.init(project="DoAn_CS211", config=args)
+    wandb.config.update(vars(args))
     # The environment
     envs = [gym.make(args.env) for _ in range(args.n_actor)]
     state_dim = envs[0].observation_space.shape[0]
