@@ -8,9 +8,9 @@ Nhớ tải file requirement.txt
 
 Nhớ tải file requirement.txt 
 
-Để có thể training thì nên dùng colab (chạy train.ypnb)
+Để có thể training thì nên dùng colab/kaggle (chạy train.ypnb)
 
-Dùng test.py để test môi trường (nhớ chỉnh file path actor.pkl)
+Dùng visualize_env.py để test môi trường (nhớ chỉnh file path actor.pkl)
 
 
 Without importance mixing:
@@ -26,4 +26,8 @@ python es_grad_im.py --env ENV_NAME --use_td3 --output OUTPUT_FOLDER
 TD3:
 ```console
 python distributed.py --env ENV_NAME --use_td3 --output OUTPUT_FOLDER
+```
+CEM:
+```console
+python CEM.py --env ENV_NAME --use_td3 --output OUTPUT_FOLDER --seed SEED
 ```
