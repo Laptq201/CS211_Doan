@@ -136,7 +136,7 @@ def train(n_episodes, output=None, debug=False, render=False):
                    "average_score": np.mean(fs), "best_score": np.max(fs)}
             for i in range(args.n_actor):
                 res["score_{}".format(i)] = fs[i]
-            df = df.append(res, ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([res])], ignore_index=True)
             df.to_pickle(args.output + "/log.pkl")
             n += 1
 
