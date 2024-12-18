@@ -264,13 +264,13 @@ if __name__ == "__main__":
             # actor_t.cuda()
 
         # CEM
-        es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
+    es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
                     pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
-        step_cpt = 0
-        total_steps = 0
-        actor_steps = 0
+    step_cpt = 0
+    total_steps = 0
+    actor_steps = 0
         # stuff to save
-        df = pd.DataFrame(columns=["total_steps", "average_score",
+    df = pd.DataFrame(columns=["total_steps", "average_score",
                                    "average_score_rl", "average_score_ea", "best_score"])
 
     while total_steps < args.max_steps:
