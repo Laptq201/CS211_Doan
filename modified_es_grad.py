@@ -290,7 +290,8 @@ if __name__ == "__main__":
         es.tell(es_params, fitness)
         total_steps += actor_steps
         step_cpt += actor_steps
-
+        print(step_cpt)
+        print(args.period)
         # save stuff
         if step_cpt >= args.period:
 
