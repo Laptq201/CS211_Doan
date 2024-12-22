@@ -11,7 +11,7 @@ import gym.spaces
 import numpy as np
 from tqdm import tqdm
 
-from ES import sepCEM, Control
+from ES import sepCEMv2, Control
 from models import RLNN
 from random_process import GaussianNoise, OrnsteinUhlenbeckProcess
 from memory import Memory
@@ -264,7 +264,7 @@ if __name__ == "__main__":
             # actor_t.cuda()
 
         # CEM
-    es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
+    es = sepCEMv2(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
                     pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
     step_cpt = 0
     total_steps = 0
@@ -274,10 +274,8 @@ if __name__ == "__main__":
                                    "average_score_rl", "average_score_ea", "best_score"])
 
     while total_steps < args.max_steps:
-        # 1. Sample population from current distribution
         es_params = es.ask(args.pop_size)
 
-        # 2. Evaluate population
         fitness = []
         for params in es_params:
             actor.set_params(params)
@@ -287,7 +285,6 @@ if __name__ == "__main__":
             print(f"Actor fitness: {f}")
             wandb.log({"Actor fitness": f})
 
-        # 3. Update the distribution based on fitness
         es.tell(es_params, fitness)
         total_steps += actor_steps
         step_cpt += actor_steps
