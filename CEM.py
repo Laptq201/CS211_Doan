@@ -11,7 +11,7 @@ import gym.spaces
 import numpy as np
 from tqdm import tqdm
 
-from ES import sepCEMv2, Control
+from ES import sepCEM, Control
 from models import RLNN
 from random_process import GaussianNoise, OrnsteinUhlenbeckProcess
 from memory import Memory
@@ -264,8 +264,9 @@ if __name__ == "__main__":
             # actor_t.cuda()
 
         # CEM
-    es = sepCEMv2(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
-                    pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
+    # es = sepCEM(actor.get_size(), mu_init=actor.get_params(), sigma_init=args.sigma_init, damp=args.damp, damp_limit=args.damp_limit,
+    #                 pop_size=args.pop_size, antithetic=not args.pop_size % 2, parents=args.pop_size // 2, elitism=args.elitism)
+    es = Control(actor.get_size(), pop_size=args.pop_size, mu_init=actor.get_params())
     step_cpt = 0
     total_steps = 0
     actor_steps = 0
