@@ -158,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument('--actor_lr', default=0.001, type=float)
     parser.add_argument('--critic_lr', default=0.001, type=float)
     parser.add_argument('--batch_size', default=100, type=int)
-    parser.add_argument('--discount', default=0.99, type=float)
+    parser.add_argument('--discount', default=0.99999, type=float) #
     parser.add_argument('--reward_scale', default=1., type=float)
     parser.add_argument('--tau', default=0.005, type=float)
     parser.add_argument('--layer_norm', dest='layer_norm', action='store_true')
